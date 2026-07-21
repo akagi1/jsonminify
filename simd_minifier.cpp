@@ -80,56 +80,76 @@ int main(int argc, char *argv[]) {
     //     std::cout << std::bitset<32>(mask) << '\n';
     // }
 
+    // lookup table
+    // is_graph_mask (8 bits) -> order (16 8-bit ints, first 8 ints empty)
+    // 00000001 -> ........-------0    
+    // 00000010 -> ........-------1
+    // 00000011 -> ........------10
+    // 00000100 -> ........-------2
+    // 00000101 -> ........------20
+    uint8_t lookup[256][16];
+    for (int mask = 0;mask < 256;mask++) {
+        for (int i = 0;i < 16;i++) {
+            // 0x80 (bit 7 set) to zero out 
+            lookup[mask][i] = 0x80;
+        }
+
+        for (int i = 0,j = 0;i < 8;i++) {
+            if (!(mask & (1 << i))) continue;
+
+            lookup[mask][j++] = i;
+        }
+    }
+
+    // detecting quotes (ascii 34)
+    // cases:
+    //  not in quotes
+    //  entire chunk in quotes that are not visible
+    //  chunk partially in quotes
+    //  one quotation mark (start or end)
+    //  multiple starts/ends per chunk
+
     alignas(16) char w_buff[16];
 
-    for (int i = 16;i < 32;i += 16) {
+    for (int i = 0;i < 16;i += 16) {
         __m128i chars = _mm_loadu_si128((const __m128i_u*)(orig.c_str() + i));
-        // print_m128i("chars", chars);
-        // Whitespaces: 9 10 13 32
-        __m128i spaces = _mm_set1_epi8(' '); 
-        __m128i is_space = _mm_cmpeq_epi8(chars, spaces);
-        __m128i new_lines = _mm_set1_epi8('\n');
-        __m128i is_new_line = _mm_cmpeq_epi8(chars, new_lines);
-        __m128i is_whitespace = _mm_or_si128(is_space, is_new_line);
-        // 1111 1111 xor 1001 1001 -> 0110 0110
+        print_m128i("chars", chars);
+
+        // 9, 10, etc., are ASCII whitespaces
+        __m128i is_whitespace = _mm_cmpeq_epi8(chars, _mm_set1_epi8(9));
+            is_whitespace = _mm_or_si128(is_whitespace, _mm_cmpeq_epi8(chars, _mm_set1_epi8(10))),
+            is_whitespace = _mm_or_si128(is_whitespace, _mm_cmpeq_epi8(chars, _mm_set1_epi8(13))),
+            is_whitespace = _mm_or_si128(is_whitespace, _mm_cmpeq_epi8(chars, _mm_set1_epi8(32)));
+
+        // Inverse, 1111 1111 xor 1001 1001 -> 0110 0110
         __m128i is_graph = _mm_xor_si128(_mm_set1_epi8(-1), is_whitespace);
 
-        unsigned int mask = _mm_movemask_epi8(is_graph);
-        // int popcount = __builtin_popcount(mask);
-        // std::cout << std::bitset<16>(mask) << ' ' << popcount << '\n';
-        // std::cout << std::bitset<8>(mask >> 8) << ' ' << std::bitset<8>(mask & 0xFF) << '\n';
-
+        unsigned int mask = _mm_movemask_epi8(is_graph),
+            lo_mask = mask & 0xFF,
+            hi_mask = mask >> 8;
 
         // Compress or pack left
         // 1111110000010001 -> 1111111100000000
         // Splitting because 2^16 lookup table doesn't fit in L1.
-        // high: 11111100 
-        // low:  00010001
-        // 0x80 (bit 7 set) to zero out 
-        // uint8_t mask_array[16] = {0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
-        // __m128i packed = _mm_shuffle_epi8(chars, _mm_loadu_si128((const __m128i*)mask_array));
-        // print_m128i("packed left", packed);
 
-        __m128i lo_order = _mm_set_epi8(0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 4, 0);
-        // print_m128i("lo_order", lo_order);
-        __m128i hi_order = _mm_set_epi8(0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 7, 6, 5, 4, 3, 2);
+        __m128i lo_order = _mm_loadu_si128((const __m128i*)lookup[lo_mask]);
+        __m128i hi_order = _mm_loadu_si128((const __m128i*)lookup[hi_mask]);
         hi_order = _mm_or_si128(hi_order, _mm_set1_epi8(8));
-        // print_m128i("hi_order", hi_order);
 
         __m128i lo = _mm_shuffle_epi8(chars, lo_order),
             hi = _mm_shuffle_epi8(chars, hi_order);
-        // print_m128i("lo", lo);
-        // print_m128i("hi", hi);
 
         // __m128i merged = _mm_unpackhi_epi64(lo, hi);
         // print_m128i("merged", merged);
 
         _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), lo);
-        ofs.write(w_buff, __builtin_popcount(mask & 0xFF));
+        ofs.write(w_buff, __builtin_popcount(lo_mask));
 
         _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), hi);
-        ofs.write(w_buff, __builtin_popcount(mask >> 8));
+        ofs.write(w_buff, __builtin_popcount(hi_mask));
     }
+
+    ofs.write("\n", 1);
 
     ofs.close();
 
