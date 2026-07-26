@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
 
     alignas(16) char w_buff[16];
 
-    for (int i = 0;i < 16;i += 16) {
+    for (int i = 0;i < 128;i += 16) {
         __m128i chars = _mm_loadu_si128((const __m128i_u*)(orig.c_str() + i));
         print_m128i("chars", chars);
 
@@ -123,6 +123,35 @@ int main(int argc, char *argv[]) {
 
         // Inverse, 1111 1111 xor 1001 1001 -> 0110 0110
         __m128i is_graph = _mm_xor_si128(_mm_set1_epi8(-1), is_whitespace);
+
+        // Detecting quotes
+        // Running carry/parity
+        // x ^= x << 1
+        // 00010010
+        // 00100100 =
+        // 00110110
+        // << 2
+        // 00110110
+        // 11011000 =
+        // 11101110
+        // << 4
+        // 11101110
+        // 11100000 =
+        // 00001110
+        // 
+        // Carry the state to the next chunk
+
+        __m128i in_quotes = _mm_cmpeq_epi8(chars, _mm_set1_epi8(34));
+        print_m128i("x", in_quotes);
+        in_quotes = _mm_xor_si128(in_quotes, _mm_slli_si128(in_quotes, 1));
+        print_m128i("x ^ (x << 1)", in_quotes);
+        in_quotes = _mm_xor_si128(in_quotes, _mm_slli_si128(in_quotes, 2));
+        print_m128i("x ^ (x << 2)", in_quotes);
+        in_quotes = _mm_xor_si128(in_quotes, _mm_slli_si128(in_quotes, 4));
+        print_m128i("x ^ (x << 4)", in_quotes);
+
+        is_graph = _mm_or_si128(is_graph, in_quotes);
+        print_m128i("is_graph", is_graph);
 
         unsigned int mask = _mm_movemask_epi8(is_graph),
             lo_mask = mask & 0xFF,
