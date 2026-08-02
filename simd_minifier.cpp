@@ -6,20 +6,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
-
-class Timer {
-    std::chrono::high_resolution_clock::time_point start_time;
-
-public:
-    void start() {
-        start_time = std::chrono::high_resolution_clock::now();
-    }
-
-    void stop() {
-        auto end = std::chrono::high_resolution_clock::now();
-        std::cout << "Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start_time).count() << "ms" << std::endl;
-    }
-};
+#include <cstring>
 
 void print_m128i(std::string_view comment, __m128i v) {
     std::cout << comment << ": ";
@@ -41,15 +28,6 @@ int main(int argc, char *argv[]) {
     std::stringstream r_buff;
     r_buff << ifs.rdbuf();
     std::string orig = r_buff.str();
-
-    std::string path(argv[1]);
-    size_t dot_index = path.rfind('.');
-    std::string new_path = path.substr(0, dot_index) + ".min" + path.substr(dot_index);
-    // is fwrite faster?
-    std::ofstream ofs(new_path, std::ios::binary);
-
-    Timer t;
-    t.start();
 
     // for (int i = 0;i < 32;i += 32) {
     //     //std::cout << (int)orig[i] << ' ';
@@ -106,10 +84,13 @@ int main(int argc, char *argv[]) {
     //  one quotation mark (start or end)
     //  multiple starts/ends per chunk
 
+    std::string output;
+    output.reserve(orig.length());
+    size_t out_pos = 0;
+
+    auto start = std::chrono::steady_clock::now();
+
     alignas(16) char w_buff[16];
-
-    // orig = "\"123456789123456";
-
     uint8_t carry = 0;
     int i = 0;
     for (;i + 15 < orig.length();i += 16) {
@@ -175,32 +156,38 @@ int main(int argc, char *argv[]) {
 
         __m128i lo = _mm_shuffle_epi8(chars, lo_order),
             hi = _mm_shuffle_epi8(chars, hi_order);
-
+        
+        int lo_count = __builtin_popcount(lo_mask),
+            hi_count = __builtin_popcount(hi_mask);
         _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), lo);
-        ofs.write(w_buff, __builtin_popcount(lo_mask));
+        memcpy(output.data() + out_pos, w_buff, lo_count);
+        out_pos += lo_count;
 
-        _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), hi);
-        ofs.write(w_buff, __builtin_popcount(hi_mask));
-
-        // std::cout << '\n';
+         _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), lo);
+        memcpy(output.data() + out_pos, w_buff, hi_count);
+        out_pos += hi_count;
     }
 
     for (;i < orig.length();i++) {
-        if (orig[i] == '"') {
-            carry ^= 1;
-        }
+        if (!carry && isspace(orig[i])) continue;;
 
-        if (!carry && !isspace(orig[i])) {
-            ofs.put(orig[i]);
-        }
+        if (orig[i] == '"') carry ^= 1;
+
+        output += orig[i];
     }
 
-    ofs.write("\n", 1);
+    auto end = std::chrono::steady_clock::now();
+    double seconds = std::chrono::duration<double>(end - start).count();
+    std::cout << "Time: " << seconds << "s\n"
+              << "Throughput: " << (orig.size() / 1e9) / seconds << " GB/s\n";
 
+    std::string path(argv[1]);
+    size_t dot_index = path.rfind('.');
+    std::string new_path = path.substr(0, dot_index) + ".min" + path.substr(dot_index);
+    std::ofstream ofs(new_path, std::ios::binary);
+    ofs << output;
     ofs.close();
-
-    t.stop();
-
     std::cout << "Minified file written to " << new_path << '\n';
+
     return 0;
 }

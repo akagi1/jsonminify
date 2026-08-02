@@ -4,20 +4,6 @@
 #include <iostream>
 #include <sstream>
 
-class Timer {
-    std::chrono::high_resolution_clock::time_point start_time;
-
-public:
-    void start() {
-        start_time = std::chrono::high_resolution_clock::now();
-    }
-
-    void stop() {
-        auto end = std::chrono::high_resolution_clock::now();
-        std::cout << "Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start_time).count() << "ms" << std::endl;
-    }
-};
-
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         std::cerr << "Error: path to a JSON file is required\n";
@@ -29,15 +15,11 @@ int main(int argc, char *argv[]) {
     buffer << ifs.rdbuf();
     std::string orig = buffer.str();
 
-    std::string path(argv[1]);
-    size_t dot_index = path.rfind('.');
-    std::string new_path = path.substr(0, dot_index) + ".min" + path.substr(dot_index);
-    std::ofstream ofs(new_path);
+    std::string output;
+    output.reserve(orig.length());
 
-    Timer t;
-    t.start();
+    auto start = std::chrono::steady_clock::now();
 
-    // To skip strings
     bool in_quotes = false;
 
     for (int i = 0;i < orig.length();i++) {
@@ -45,11 +27,21 @@ int main(int argc, char *argv[]) {
 
         if (orig[i] == '"') in_quotes = !in_quotes;
 
-        ofs << orig[i];
+        output += orig[i];
     }
 
-    t.stop();
+    auto end = std::chrono::steady_clock::now();
+    double seconds = std::chrono::duration<double>(end - start).count();
+    std::cout << "Time: " << seconds << "s\n"
+              << "Throughput: " << (orig.size() / 1e9) / seconds << " GB/s\n";
 
+    std::string path(argv[1]);
+    size_t dot_index = path.rfind('.');
+    std::string new_path = path.substr(0, dot_index) + ".min" + path.substr(dot_index);
+    std::ofstream ofs(new_path);
+    ofs << output;
+    ofs.close();
     std::cout << "Minified file written to " << new_path << '\n';
+
     return 0;
 }
