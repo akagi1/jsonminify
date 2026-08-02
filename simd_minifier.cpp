@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
     //  multiple starts/ends per chunk
 
     std::string output;
-    output.reserve(orig.length());
+    output.resize(orig.length());
     size_t out_pos = 0;
 
     auto start = std::chrono::steady_clock::now();
@@ -163,7 +163,7 @@ int main(int argc, char *argv[]) {
         memcpy(output.data() + out_pos, w_buff, lo_count);
         out_pos += lo_count;
 
-         _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), lo);
+        _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), hi);
         memcpy(output.data() + out_pos, w_buff, hi_count);
         out_pos += hi_count;
     }
@@ -171,10 +171,12 @@ int main(int argc, char *argv[]) {
     for (;i < orig.length();i++) {
         if (!carry && isspace(orig[i])) continue;;
 
-        if (orig[i] == '"') carry ^= 1;
+        if (orig[i] == '"') carry ^= 0xFF;
 
-        output += orig[i];
+        output[out_pos++] = orig[i];
     }
+
+    output.resize(out_pos);
 
     auto end = std::chrono::steady_clock::now();
     double seconds = std::chrono::duration<double>(end - start).count();
