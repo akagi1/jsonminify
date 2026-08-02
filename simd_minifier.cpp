@@ -51,9 +51,6 @@ int main(int argc, char *argv[]) {
     Timer t;
     t.start();
 
-    // To skip strings
-    bool in_quotes = false;
-    
     // for (int i = 0;i < 32;i += 32) {
     //     //std::cout << (int)orig[i] << ' ';
 
@@ -111,9 +108,13 @@ int main(int argc, char *argv[]) {
 
     alignas(16) char w_buff[16];
 
-    for (int i = 0;i < 128;i += 16) {
+    // orig = "\"123456789123456";
+
+    uint8_t carry = 0;
+    for (int i = 0;i < orig.length();i += 16) {
+        // std::cout << orig.substr(i, 16) << '\n';
         __m128i chars = _mm_loadu_si128((const __m128i_u*)(orig.c_str() + i));
-        print_m128i("chars", chars);
+        // print_m128i("chars", chars);
 
         // 9, 10, etc., are ASCII whitespaces
         __m128i is_whitespace = _mm_cmpeq_epi8(chars, _mm_set1_epi8(9));
@@ -123,35 +124,41 @@ int main(int argc, char *argv[]) {
 
         // Inverse, 1111 1111 xor 1001 1001 -> 0110 0110
         __m128i is_graph = _mm_xor_si128(_mm_set1_epi8(-1), is_whitespace);
+        // print_m128i("is_graph", is_graph);
 
         // Detecting quotes
         // Running carry/parity
+        // Parity: where there even or odd number of quotes so far
+        // 1 = odd, 0 = even
         // x ^= x << 1
         // 00010010
         // 00100100 =
         // 00110110
+        // Know each position has parity of the last 2 elements
         // << 2
-        // 00110110
-        // 11011000 =
         // 11101110
         // << 4
-        // 11101110
-        // 11100000 =
         // 00001110
         // 
         // Carry the state to the next chunk
 
         __m128i in_quotes = _mm_cmpeq_epi8(chars, _mm_set1_epi8(34));
-        print_m128i("x", in_quotes);
         in_quotes = _mm_xor_si128(in_quotes, _mm_slli_si128(in_quotes, 1));
-        print_m128i("x ^ (x << 1)", in_quotes);
         in_quotes = _mm_xor_si128(in_quotes, _mm_slli_si128(in_quotes, 2));
-        print_m128i("x ^ (x << 2)", in_quotes);
         in_quotes = _mm_xor_si128(in_quotes, _mm_slli_si128(in_quotes, 4));
-        print_m128i("x ^ (x << 4)", in_quotes);
+        in_quotes = _mm_xor_si128(in_quotes, _mm_slli_si128(in_quotes, 8));
+
+        // whatever ^ 0xff flips it
+        // whatever ^ 0x00 stays the same
+        in_quotes =  _mm_xor_si128(in_quotes, _mm_set1_epi8(carry));
+
+        carry = _mm_extract_epi8(in_quotes, 15);
+        // std::cout << "carry: " << +carry << '\n';
+
+
+        // print_m128i("in_quotes", in_quotes);
 
         is_graph = _mm_or_si128(is_graph, in_quotes);
-        print_m128i("is_graph", is_graph);
 
         unsigned int mask = _mm_movemask_epi8(is_graph),
             lo_mask = mask & 0xFF,
@@ -168,14 +175,13 @@ int main(int argc, char *argv[]) {
         __m128i lo = _mm_shuffle_epi8(chars, lo_order),
             hi = _mm_shuffle_epi8(chars, hi_order);
 
-        // __m128i merged = _mm_unpackhi_epi64(lo, hi);
-        // print_m128i("merged", merged);
-
         _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), lo);
         ofs.write(w_buff, __builtin_popcount(lo_mask));
 
         _mm_store_si128(reinterpret_cast<__m128i*>(w_buff), hi);
         ofs.write(w_buff, __builtin_popcount(hi_mask));
+
+        // std::cout << '\n';
     }
 
     ofs.write("\n", 1);
