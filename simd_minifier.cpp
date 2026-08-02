@@ -111,7 +111,8 @@ int main(int argc, char *argv[]) {
     // orig = "\"123456789123456";
 
     uint8_t carry = 0;
-    for (int i = 0;i < orig.length();i += 16) {
+    int i = 0;
+    for (;i + 15 < orig.length();i += 16) {
         // std::cout << orig.substr(i, 16) << '\n';
         __m128i chars = _mm_loadu_si128((const __m128i_u*)(orig.c_str() + i));
         // print_m128i("chars", chars);
@@ -184,11 +185,21 @@ int main(int argc, char *argv[]) {
         // std::cout << '\n';
     }
 
+    for (;i < orig.length();i++) {
+        if (orig[i] == '"') {
+            carry ^= 1;
+        }
+
+        if (!carry && !isspace(orig[i])) {
+            ofs.put(orig[i]);
+        }
+    }
+
     ofs.write("\n", 1);
 
     ofs.close();
 
-    //t.stop();
+    t.stop();
 
     std::cout << "Minified file written to " << new_path << '\n';
     return 0;
